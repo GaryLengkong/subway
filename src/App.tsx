@@ -1,45 +1,95 @@
+import { Menu } from '@blueprintjs/core';
+import '@blueprintjs/core/lib/css/blueprint.css';
+import '@blueprintjs/icons/lib/css/blueprint-icons.css';
 import {
-  Paper,
+  CopyCellsMenuItem,
+  IMenuContext,
+  SelectionModes,
   Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  TableSortLabel,
-  Tooltip,
-} from '@material-ui/core';
+  Utils,
+} from '@blueprintjs/table';
+import '@blueprintjs/table/lib/css/table.css';
+import 'normalize.css/normalize.css';
 import * as React from 'react';
+import SortableColumn, {ISortableColumn} from './SortableColumn';
+
 
 const SUBWAY_URL = './subway.json';
-const numberFormatter = new Intl.NumberFormat();
 
-type Direction = 'asc' | 'desc';
-
-interface IStation {
-  entries: number;
-  exits: number;
-  name: string;
-  total: number;
-}
-
-interface IAppState {
-  stations: IStation[];
-  sortBy: string;
-  direction: Direction;
-}
-
-class App extends React.Component<{}, IAppState> {
-
-  constructor(props: any) {
-    super(props);
-    this.state = {
-      direction: 'desc',
-      sortBy: 'total',
-      stations: [],
-    };
+class App extends React.PureComponent {
+  public state = {
+    columns: [
+      new SortableColumn('Name', 0),
+      new SortableColumn('Entries', 1),
+      new SortableColumn('Exits', 2),
+      new SortableColumn('Total', 3),
+    ] as ISortableColumn[],
+    data: [],
+    sortedIndexMap: [] as number[],
+  };
+  
+  public async componentDidMount() {
+    const response = await fetch(SUBWAY_URL);
+    const json = await response.json();
+    const subwayData = json.subwayData;
+    const stationByName = this.getStationByName(subwayData)
+    const stations = []
+    for (const name in stationByName) {
+      if (stationByName.hasOwnProperty(name)) {
+        stations.push(stationByName[name]);
+      }
+    }
+    const data = stations.map((station) => {
+      return [
+        station.name,
+        station.entries,
+        station.exits,
+        station.total
+      ];
+    });
+    this.setState({data});
   }
-
-  public getStationByName(subwayData: any): any {
+  
+  public render() {
+    const numRows = this.state.data.length;
+    const columns = this.state.columns.map(col => col.getColumn(this.getCellData, this.sortColumn));
+    return (
+      <Table
+      bodyContextMenuRenderer={this.renderBodyContextMenu}
+      numRows={numRows}
+      selectionModes={SelectionModes.COLUMNS_AND_CELLS}
+      >
+      {columns}
+      </Table>
+    );
+  }
+  
+  private getCellData = (rowIndex: number, columnIndex: number) => {
+    const sortedRowIndex = this.state.sortedIndexMap[rowIndex];
+    if (sortedRowIndex != null) {
+      rowIndex = sortedRowIndex;
+    }
+    return this.state.data[rowIndex][columnIndex];
+  };
+  
+  private renderBodyContextMenu = (context: IMenuContext) => {
+    return (
+      <Menu>
+      <CopyCellsMenuItem context={context} getCellData={this.getCellData} text='Copy' />
+      </Menu>
+    );
+  };
+  
+  private sortColumn = (columnIndex: number, comparator: (a: any, b: any) => number) => {
+    const { data } = this.state;
+    const sortedIndexMap = Utils.times(data.length, (i: number) => i);
+    sortedIndexMap.sort((a: number, b: number) => {
+      return comparator(data[a][columnIndex], data[b][columnIndex]);
+    });
+    this.setState({ sortedIndexMap });
+  };
+  
+  private getStationByName(subwayData: any): any {
     return subwayData.reduce((stationByName: any, stationData: any) => {
       const name = stationData.STATION;
       const entries = parseInt(stationData.ENTRIES, 10);
@@ -61,96 +111,6 @@ class App extends React.Component<{}, IAppState> {
       return stationByName;
     }, {})
   }
-
-  public async componentDidMount() {
-    const response = await fetch(SUBWAY_URL);
-    const data = await response.json();
-    const subwayData = data.subwayData;
-    const stationByName = this.getStationByName(subwayData)
-    const stations = []
-    for (const name in stationByName) {
-      if (stationByName.hasOwnProperty(name)) {
-        stations.push(stationByName[name]);
-      }
-    }
-    this.setState({stations});
-  }
-
-  public renderTableHeaderCell(title: string, property: string, numeric: boolean) {
-    const {sortBy, direction} = this.state;
-    return (
-      <TableCell
-        numeric={numeric}
-        sortDirection={sortBy === property ? direction : false}
-      >
-        <Tooltip
-          title="Sort"
-          placement={numeric ? 'bottom-end' : 'bottom-start'}
-          enterDelay={300}
-          >
-            <TableSortLabel
-              active={sortBy === property}
-              direction={direction}
-              onClick={this.handleSortChange(property)}
-              >
-                {title}
-              </TableSortLabel>
-          </Tooltip>
-      </TableCell>
-    )
-  }
-
-  public render() {
-    const {stations} = this.state;
-    return (
-      <Paper>
-        <Table>
-          <TableHead>
-            <TableRow>
-              {this.renderTableHeaderCell('Station', 'name', false)}
-              {this.renderTableHeaderCell('Entries', 'entries', true)}
-              {this.renderTableHeaderCell('Exits', 'exits', true)}
-              {this.renderTableHeaderCell('Total', 'total', true)}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {stations.sort(this.getComparator()).map((station) => (
-              <TableRow key={station.name}>
-                <TableCell>{station.name}</TableCell>
-                <TableCell numeric={true}>{numberFormatter.format(station.entries)}</TableCell>
-                <TableCell numeric={true}>{numberFormatter.format(station.exits)}</TableCell>
-                <TableCell numeric={true}>{numberFormatter.format(station.total)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Paper>
-    );
-  }
-
-    public getComparator() {
-      return (a: IStation, b: IStation) => {
-        const {sortBy, direction} = this.state;
-        let diff = -1;
-        if (a[sortBy] > b[sortBy]) {
-          diff = 1;
-        }
-        if (direction === 'desc') {
-          diff = -diff;
-        }
-        return diff;
-      }
-    }
-
-    public handleSortChange = (property: string) => () => {
-      const sortBy = property;
-      let direction: Direction  = 'desc';
-      if (this.state.sortBy === property && this.state.direction === 'desc') {
-        direction = 'asc';
-      }
-      this.setState({direction, sortBy});
-    }
-
 }
 
 export default App;
